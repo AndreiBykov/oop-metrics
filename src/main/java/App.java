@@ -19,6 +19,7 @@ import javassist.CtClass;
 import javassist.CtMethod;
 import javassist.Modifier;
 import javassist.NotFoundException;
+import javassist.bytecode.Descriptor;
 import javassist.bytecode.InstructionPrinter;
 import javax.swing.JApplet;
 import javax.swing.JComponent;
@@ -61,7 +62,7 @@ public class App {
 //
 //        methodsWithFields.forEach((k, v) -> System.out.println(k.getName() + "\t: " + v));
 
-        List<CtMethod> publicMethods = getPublicMethods("java.awt.Dialog");
+        List<CtMethod> publicMethods = getPublicMethods("java.awt.Component");
         publicMethods.forEach(App::getInvokedMethods);
     }
 
@@ -79,7 +80,8 @@ public class App {
         ClassPool pool = ClassPool.getDefault();
         try {
             CtClass ctClass = pool.get(className);
-            CtMethod[] ctMethods = ctClass.getDeclaredMethods(); // should be getMethods() since inherited methods are also needed
+            CtMethod[] ctMethods = ctClass
+                .getDeclaredMethods(); // should be getMethods() since inherited methods are also needed
             return Arrays.stream(ctMethods)
                 .filter(ctMethod -> Modifier.isPublic(ctMethod.getModifiers()))
                 .collect(Collectors.toList());
@@ -89,21 +91,22 @@ public class App {
         }
     }
 
-    private static void getInvokedMethods(CtMethod method) {
+    private static List<CtMethod> getInvokedMethods(CtMethod method) {
         String content = getMethodContent(method);
 
-        System.out.println(method.getName());
-        System.out.println();
-
-        Arrays.stream(content.split("\\r?\\n"))
+        return Arrays.stream(content.split("\\r?\\n"))
             .filter(string -> string.contains("invoke"))
             .filter(string -> !string.contains("<init>"))
-            .forEach(System.out::println);
-//            .map(string -> string.replaceAll(".*Field ", ""))
-//            .map(string -> string.replaceAll("\\(.+\\)", ""))
-//            .collect(Collectors.toCollection(LinkedHashSet::new));
-        System.out.println("-----------------------");
-
+            .map(string -> string.replaceAll(".*Method ", ""))
+            .map(string -> {
+                try {
+                    return getMethodByDescription(string);
+                } catch (NotFoundException e) {
+                    e.printStackTrace();
+                    throw new RuntimeException();
+                }
+            })
+            .collect(Collectors.toList());
     }
 
     private static String getMethodContent(CtMethod method) {
@@ -112,5 +115,16 @@ public class App {
         InstructionPrinter i = new InstructionPrinter(ps);
         i.print(method);
         return baos.toString();
+    }
+
+    private static CtMethod getMethodByDescription(String desc) throws NotFoundException {
+        ClassPool pool = ClassPool.getDefault();
+
+        String className = desc.substring(0, desc.lastIndexOf("."));
+        CtClass ctClass = pool.get(className);
+
+        String methodName = desc.substring(desc.lastIndexOf(".") + 1, desc.indexOf("("));
+        String methodDescription = desc.substring(desc.indexOf("(") + 1, desc.lastIndexOf(")"));
+        return ctClass.getMethod(methodName, methodDescription);
     }
 }
